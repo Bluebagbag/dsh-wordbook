@@ -27,20 +27,14 @@ https://github.com/你的用户名/dsh-wordbook.git
 
 ## 3. 用 SSH 推送（推荐，不需要把密码给我）
 
-本机已经生成了一把专用 SSH key：
+如果你没有 SSH key，先生成一把（有就跳过）：
 
-```
-私钥：~/.ssh/dsh_wordbook_ed25519
-公钥：~/.ssh/dsh_wordbook_ed25519.pub
-```
-
-1. 复制下面这把公钥（完整一行）：
-
-```
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINSS2GzoG84C0yilh2nNFZHC4OEiNBgD9gklX5O7ak9W dsh-wordbook
+```bash
+ssh-keygen -t ed25519 -C "你的邮箱"
+cat ~/.ssh/id_ed25519.pub
 ```
 
-   或者直接从文件读：`cat ~/.ssh/dsh_wordbook_ed25519.pub`
+把 `cat` 出来的整行公钥复制下来。
 
 2. GitHub → 右上角头像 → **Settings** → **SSH and GPG keys** → **New SSH key**；
 3. Title 填 `dsh-wordbook`，Key type 选 `Authentication Key`，粘贴公钥，保存；
