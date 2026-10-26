@@ -1,0 +1,4 @@
+# dsh-maimemo 的宿主插件行（id 必须与 index.js 的 export const name 一致）。
+- insert:
+    - id: maimemo
+      name: dsh-maimemo

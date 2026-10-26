@@ -1,0 +1,5 @@
+# dsh-wordbook 的宿主插件行。
+# id 必须与 index.js 的 `export const name` 一致（都是 wordbook）。
+- insert:
+    - id: wordbook
+      name: dsh-wordbook

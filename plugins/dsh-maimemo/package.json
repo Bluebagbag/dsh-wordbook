@@ -1,0 +1,20 @@
+{
+  "name": "dsh-maimemo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "只读的墨墨背单词开放 API 桥接：今日任务/进度/学习记录、单词与自定义释义/例句。不调用任何写接口。",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": ["index.js", "cordis.patch.yml", "README.md"],
+  "license": "MIT"
+}

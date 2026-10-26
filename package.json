@@ -1,0 +1,11 @@
+{
+  "name": "dsh-wordbook-suite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A vocabulary trainer plugin suite for DeepSeek Harness.",
+  "scripts": {
+    "test": "node plugins/dsh-wordbook/test/smoke.mjs && node plugins/dsh-wordbook/test/render.mjs"
+  },
+  "license": "MIT"
+}
