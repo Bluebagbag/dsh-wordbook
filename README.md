@@ -24,7 +24,7 @@
 前置：已经装好 DSH，并有一个 profile（默认 `~/.dsh/profiles/web`）。
 
 ```bash
-git clone <你的仓库地址> dsh-wordbook
+git clone https://github.com/Bluebagbag/dsh-wordbook.git
 cd dsh-wordbook
 bash install.sh
 ```
@@ -92,6 +92,10 @@ node plugins/dsh-wordbook/test/render.mjs
 - 墨墨 `interpretations` / `phrases` 只返回**你账号自己创建过**的内容，不含内置词典；没有内容时插件会用 AI 释义/造句兜底。
 - 阅读题由 AI 生成，偶尔会有不严谨的地方。
 - 不做账号体系、多端同步；数据保存在本机。
+
+## 问题反馈
+
+GitHub Issues：<https://github.com/Bluebagbag/dsh-wordbook/issues>
 
 ## License
 
