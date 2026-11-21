@@ -15,6 +15,17 @@ Most flashcard apps keep your words inside their own schedule. This plugin puts 
 - **Reading comprehension**: uses **all of today's Maimemo words** when available. Passage length scales with the word count, and the number of questions drops for long lists so every word fits.
 - **Optional Maimemo sync (read-only)**: today's progress, daily words, study counts, and `STICKING` / `WELL_FAMILIAR` tags. The plugin never writes to your Maimemo account.
 
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/word-rail.jpg" alt="Vocabulary trainer: scrollable word rail on the left and the AI coach on the right" width="100%">
+</p>
+
+| English → Chinese recall | Reading passage using today's words | Reading quiz with instant feedback |
+| --- | --- | --- |
+| ![English to Chinese recall](docs/screenshots/coach-chat.jpg) | ![Reading passage](docs/screenshots/reading-passage.jpg) | ![Reading quiz](docs/screenshots/reading-quiz.jpg) |
+
 ## Plugins
 
 | Directory | Purpose |

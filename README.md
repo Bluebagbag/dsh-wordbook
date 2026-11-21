@@ -13,6 +13,17 @@
 
 > 这不是墨墨或 DeepSeek 官方项目，是个人自用插件整理出来的。墨墨开放 API 目前是公测，接口可能变。
 
+
+## 界面
+
+<p align="center">
+  <img src="docs/screenshots/word-rail.jpg" alt="背单词面板：左侧是可滚动的词卷，右侧是老师的对话讲解" width="100%">
+</p>
+
+| 英译中默写：只问句中词义 | 阅读短文：覆盖今日全部单词 | 阅读理解：点选项当场判对错 |
+| --- | --- | --- |
+| ![英译中默写](docs/screenshots/coach-chat.jpg) | ![阅读短文](docs/screenshots/reading-passage.jpg) | ![阅读理解题](docs/screenshots/reading-quiz.jpg) |
+
 ## 三个插件
 
 | 目录 | 作用 |
