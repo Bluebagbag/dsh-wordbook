@@ -1,3 +1,5 @@
+**中文** | [English](README.en.md)
+
 # 背单词 · DSH 插件
 
 给 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai) Web 界面用的背单词插件：
