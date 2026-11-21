@@ -18,13 +18,13 @@ Most flashcard apps keep your words inside their own schedule. This plugin puts 
 
 ## Screenshots
 
-<p align="center">
-  <img src="docs/screenshots/word-rail.jpg" alt="Vocabulary trainer: scrollable word rail on the left and the AI coach on the right" width="100%">
-</p>
+| Word rail + AI coach | English → Chinese recall |
+| --- | --- |
+| ![Word rail and coach](docs/screenshots/word-rail.jpg) | ![English to Chinese recall](docs/screenshots/coach-chat.jpg) |
 
-| English → Chinese recall | Reading passage using today's words | Reading quiz with instant feedback |
-| --- | --- | --- |
-| ![English to Chinese recall](docs/screenshots/coach-chat.jpg) | ![Reading passage](docs/screenshots/reading-passage.jpg) | ![Reading quiz](docs/screenshots/reading-quiz.jpg) |
+| Reading passage using today's words | Reading quiz with instant feedback |
+| --- | --- |
+| ![Reading passage](docs/screenshots/reading-passage.jpg) | ![Reading quiz](docs/screenshots/reading-quiz.jpg) |
 
 ## Plugins
 
