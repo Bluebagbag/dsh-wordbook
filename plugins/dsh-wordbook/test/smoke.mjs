@@ -18,7 +18,7 @@ const moduleExports = captured.factory((name) => {
   if (name === 'react') return React
   throw new Error('unexpected require: ' + name)
 })
-const { parseWordInput, normalizeState, normalizeWords, REVIEW_INTERVALS, normalizeReview, rateReview, isDueToday, isMature, dueLabel } = moduleExports.__internals
+const { parseWordInput, normalizeState, normalizeWords, REVIEW_INTERVALS, normalizeReview, rateReview, isDueToday, isMature, dueLabel, judgeLocal } = moduleExports.__internals
 
 const pairs = (text) => JSON.stringify(parseWordInput(text).map((w) => [w.term, w.meaning]))
 assert.equal(pairs('apple 苹果'), JSON.stringify([['apple', '苹果']]))
@@ -64,6 +64,15 @@ assert.equal(isMature({ review: { stage: 0 }, createdAt: now - 8 * 24 * 60 * 60 
 assert.equal(isMature({ review: { stage: 0 }, createdAt: now }, now), false)
 
 console.log('wordbook smoke: OK')
+
+// 结构化默写的本地判分：明显匹配直接过，拿不准交给 AI。
+assert.equal(judgeLocal('挑战', { meaning: '挑战；质疑', accepted: [] }), true)
+assert.equal(judgeLocal('挑 战', { meaning: '挑战', accepted: [] }), true)
+assert.equal(judgeLocal('意思为挑战', { meaning: '挑战', accepted: [] }), true)
+assert.equal(judgeLocal('文化遗产', { meaning: '遗产', accepted: ['文化遗产'] }), true)
+assert.equal(judgeLocal('质疑', { meaning: '挑战', accepted: ['挑战', '难题'] }), null)
+assert.equal(judgeLocal('让水变干净', { meaning: '净化', accepted: ['净化', '过滤'] }), null)
+assert.equal(judgeLocal('不是挑战', { meaning: '挑战', accepted: [] }), null)
 
 // 墨墨阶段判定：新词 / STICKING 一律词义模式；熟知或已学 4 次以上才整句。
 const bridge = await import('../../dsh-maimemo/index.js')

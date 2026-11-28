@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 把本仓库的三个插件装进一个 DSH profile。
+# 把本仓库的四个插件装进一个 DSH profile。
 # 用法：
 #   ./install.sh
 #   DSH_HOME=~/.dsh DSH_PROFILE=~/.dsh/profiles/web ./install.sh
@@ -16,7 +16,7 @@ if [ ! -d "$PROFILE" ]; then
 fi
 
 mkdir -p "$PROFILE/node_modules"
-for pkg in dsh-wordbook dsh-maimemo dsh-reading; do
+for pkg in dsh-wordbook dsh-maimemo dsh-reading dsh-practice; do
   ln -sfn "$REPO_DIR/plugins/$pkg" "$PROFILE/node_modules/$pkg"
   echo "link  $PROFILE/node_modules/$pkg"
 done
@@ -31,7 +31,7 @@ const repo = process.argv[3];
 const manifestPath = path.join(profile, 'package.json');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 manifest.dependencies = manifest.dependencies || {};
-for (const pkg of ['dsh-wordbook', 'dsh-maimemo', 'dsh-reading']) {
+for (const pkg of ['dsh-wordbook', 'dsh-maimemo', 'dsh-reading', 'dsh-practice']) {
   manifest.dependencies[pkg] = 'link:' + path.join(repo, 'plugins', pkg);
 }
 const sorted = {};
@@ -47,6 +47,7 @@ const rows = [
   ['wordbook', 'dsh-wordbook'],
   ['maimemo', 'dsh-maimemo'],
   ['reading-gen', 'dsh-reading'],
+  ['practice', 'dsh-practice'],
 ];
 const missing = rows.filter(([id]) => !new RegExp('^\\s*-\\s*id:\\s*' + id + '\\s*$', 'm').test(patch));
 if (missing.length > 0) {

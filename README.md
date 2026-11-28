@@ -8,6 +8,7 @@
 - 自己录入单词，中文释义和音标自动补；
 - 艾宾浩斯复习排期 + 每日任务；
 - 聊天式词汇教练：先让你回忆/猜，一次只练 1~2 个词，答错先指出错在哪；
+- **结构化默写**：一次 5/10/15 个词，给英文语境句，只填这个词在句中的中文意思；答完有正确率、错词和本轮报告；
 - 一键出阅读理解题，**可以用墨墨今日的全部单词**写短文（词多时自动拉长短文 / 减少题目）；
 - 可选接入墨墨背单词开放 API，**只读**读取今日任务、学习进度、阶段标签，不修改你的学习内容。
 
@@ -24,13 +25,14 @@
 | --- | --- |
 | ![阅读短文](docs/screenshots/reading-passage.jpg) | ![阅读理解题](docs/screenshots/reading-quiz.jpg) |
 
-## 三个插件
+## 四个插件
 
 | 目录 | 作用 |
 | --- | --- |
 | `plugins/dsh-wordbook` | 主插件：侧栏词卷、本地词表、聊天、阅读题；客户端 + 宿主 |
 | `plugins/dsh-maimemo` | 墨墨开放 API 的**只读**桥：今日任务、进度、学习记录、自定义释义/例句 |
 | `plugins/dsh-reading` | 按词数动态拉长的阅读题生成服务，保证长词表也能全覆盖 |
+| `plugins/dsh-practice` | 结构化默写：语境句式生成 + 中文语义判分 |
 
 ## 安装
 
@@ -44,9 +46,9 @@ bash install.sh
 
 `install.sh` 会做四件事（可重复执行）：
 
-1. 把三个插件链接到 profile 的 `node_modules/`；
+1. 把四个插件链接到 profile 的 `node_modules/`；
 2. 在 profile 的 `package.json` 里补上 `link:` 依赖；
-3. 在 `cordis.patch.yml` 末尾追加三个 Loader 行（已存在就跳过）；
+3. 在 `cordis.patch.yml` 末尾追加四个 Loader 行（已存在就跳过）；
 4. 在 `$DSH_HOME/maimemo/config.json` 生成一个空 token 模板（已存在则不覆盖，权限 600）。
 
 装完 **刷新一次网页**；宿主半边由 patch 热加载，客户端半边要刷新页面进入 boot manifest。

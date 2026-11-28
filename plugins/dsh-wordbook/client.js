@@ -17,6 +17,7 @@ window.__ModuleLoader__.load({
 
     const API = '/dsh-wordbook/api';
     const MM_API = '/dsh-maimemo/api';
+    const PRACTICE_API = '/dsh-practice/api';
     const LS_KEY = 'dsh-wordbook:state:v1';
     const EMPTY_STATE = { version: 1, words: [], chat: [], reading: null, updatedAt: 0 };
     const DIFFICULTIES = ['初中', '高中', '四级', '六级', '考研'];
@@ -242,6 +243,65 @@ window.__ModuleLoader__.load({
       });
     }
 
+    // ── 1.5 结构化默写：本地判分 / 语境高亮 ────────────────────────────
+
+    function normalizeZh(value) {
+      return String(value ?? '')
+        .toLowerCase()
+        .replace(/[\s\u3000]/g, '')
+        .replace(/[，。；、,.!?！？:：;'"“”‘’()（）\[\]【】]/g, '')
+        .replace(/^(意思是|意思为|表示|指|就是)/, '');
+    }
+
+    function splitSenses(item) {
+      const raw = [item?.meaning, ...(Array.isArray(item?.accepted) ? item.accepted : [])];
+      const out = [];
+      for (const chunk of raw) {
+        for (const part of String(chunk ?? '').split(/[；;，,、/|]/)) {
+          const normalized = normalizeZh(part);
+          if (normalized) out.push(normalized);
+        }
+      }
+      return [...new Set(out)];
+    }
+
+    /** 本地先判：明显匹配返回 true，拿不准返回 null 交给 AI。 */
+    function judgeLocal(answer, item) {
+      const value = normalizeZh(answer);
+      if (!value) return null;
+      const senses = splitSenses(item);
+      if (senses.includes(value)) return true;
+      // 带否定的答案不要本地放过，交给 AI 判。
+      if (/^(不|没|非|无|别)/.test(value)) return null;
+      if (
+        value.length >= 2 &&
+        senses.some((sense) => sense.length >= 2 && (sense.includes(value) || (value.includes(sense) && value.length <= sense.length + 2)))
+      ) {
+        return true;
+      }
+      return null;
+    }
+
+    /** 把语境句里的目标词高亮成 <mark>。 */
+    function renderContext(sentence, term) {
+      const text = String(sentence ?? '');
+      const target = String(term ?? '').trim();
+      if (!target) return text;
+      const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp('\\b(' + escaped + ')\\b', 'ig');
+      return text.split(pattern).map((part, index) =>
+        part.toLowerCase() === target.toLowerCase() ? h('mark', { className: 'wb-mark', key: index }, part) : part,
+      );
+    }
+
+    function formatDuration(milliseconds) {
+      const seconds = Math.max(0, Math.round((Number(milliseconds) || 0) / 1000));
+      if (seconds < 60) return seconds + ' 秒';
+      const minutes = Math.floor(seconds / 60);
+      const rest = seconds % 60;
+      return minutes + ' 分 ' + (rest > 0 ? rest + ' 秒' : '');
+    }
+
     // ── 2. 图标 ───────────────────────────────────────────────────────
 
     function BookIcon({ size = 16 }) {
@@ -293,9 +353,10 @@ window.__ModuleLoader__.load({
 
     function WordbookPanel(props) {
       const testMaimemo = props && props.__testMaimemo;
+      const testPractice = props && props.__testPractice;
       const [state, setState] = React.useState(loadLocal);
       const [ready, setReady] = React.useState(false);
-      const [tab, setTab] = React.useState('chat');
+      const [tab, setTab] = React.useState(() => (testPractice ? 'practice' : 'chat'));
       const [draft, setDraft] = React.useState('');
       const [showAdd, setShowAdd] = React.useState(false);
       const [addText, setAddText] = React.useState('');
@@ -317,6 +378,22 @@ window.__ModuleLoader__.load({
       const [onlyDue, setOnlyDue] = React.useState(false);
       const [maimemo, setMaimemo] = React.useState(() => testMaimemo || { status: 'idle', progress: null, items: [], counts: null, error: '' });
       const [source, setSource] = React.useState(() => (testMaimemo ? 'maimemo' : 'local'));
+      const [practice, setPractice] = React.useState(
+        () =>
+          testPractice || {
+            status: 'idle',
+            source: 'maimemo',
+            count: 10,
+            items: [],
+            index: 0,
+            input: '',
+            results: [],
+            feedback: null,
+            busy: false,
+            error: '',
+            startedAt: 0,
+          },
+      );
       const [mmMeanings, setMmMeanings] = React.useState({});
       const [mmBusy, setMmBusy] = React.useState({});
       const sourceTouched = React.useRef(false);
@@ -326,6 +403,7 @@ window.__ModuleLoader__.load({
 
       const scrollRef = React.useRef(null);
       const composerRef = React.useRef(null);
+      const practiceInputRef = React.useRef(null);
       const stateRef = React.useRef(state);
       stateRef.current = state;
 
@@ -751,6 +829,257 @@ window.__ModuleLoader__.load({
         }, 30);
       }
 
+      // ── 结构化默写 ──────────────────────────────────────────────
+
+      function practiceCandidates(sourceKind, count) {
+        if (sourceKind === 'maimemo') {
+          const weight = (item) => (item.sticking ? 3 : 0) + (item.firstResponse === 'FORGET' ? 2 : 0) + (item.isNew ? 1 : 0);
+          const ordered = [...mmItems.filter((item) => !item.isFinished), ...mmItems.filter((item) => item.isFinished)].sort(
+            (left, right) => weight(right) - weight(left),
+          );
+          return ordered.slice(0, count).map((item) => {
+            const key = String(item.spelling).toLowerCase();
+            const cached = mmMeanings[key];
+            return {
+              term: item.spelling,
+              meaning: cached?.text || '',
+              localWordId: null,
+              source: 'maimemo',
+              phonetic: cached?.phonetic || '',
+              mode: item.mode,
+            };
+          });
+        }
+        const pool = [...dueWords, ...state.words.filter((word) => !dueWords.some((due) => due.id === word.id))].sort(
+          (left, right) => (left.review?.dueAt || 0) - (right.review?.dueAt || 0) || (right.review?.lapses || 0) - (left.review?.lapses || 0),
+        );
+        return pool.slice(0, count).map((word) => ({
+          term: word.term,
+          meaning: meaningOf(word),
+          localWordId: word.id,
+          source: 'local',
+          phonetic: word.phonetic || '',
+          mode: 'word',
+        }));
+      }
+
+      async function startPractice(overrides = {}) {
+        if (practice.status === 'loading') return;
+        const nextSource = overrides.source || practice.source;
+        const nextCount = Number(overrides.count) || practice.count;
+        setTab('practice');
+        if (Array.isArray(overrides.items) && overrides.items.length > 0) {
+          setPractice((previous) => ({
+            ...previous,
+            status: 'ready',
+            source: nextSource,
+            count: overrides.items.length,
+            items: overrides.items,
+            index: 0,
+            input: '',
+            results: [],
+            feedback: null,
+            busy: false,
+            error: '',
+            startedAt: Date.now(),
+            finishedAt: 0,
+          }));
+          return;
+        }
+        const candidates = practiceCandidates(nextSource, nextCount);
+        if (candidates.length === 0) {
+          setPractice((previous) => ({
+            ...previous,
+            status: 'idle',
+            source: nextSource,
+            count: nextCount,
+            error: nextSource === 'maimemo' ? '墨墨今天没有单词，先在 App 里生成今日任务。' : '本地词表还是空的，先添加几个词。',
+          }));
+          return;
+        }
+        setPractice((previous) => ({
+          ...previous,
+          status: 'loading',
+          source: nextSource,
+          count: nextCount,
+          items: [],
+          index: 0,
+          input: '',
+          results: [],
+          feedback: null,
+          busy: false,
+          error: '',
+        }));
+        try {
+          const data = await postJson(
+            '/generate',
+            { words: candidates.map((word) => ({ term: word.term, meaning: word.meaning })), count: candidates.length },
+            PRACTICE_API,
+          );
+          const meta = new Map(candidates.map((word) => [word.term.toLowerCase(), word]));
+          const items = (Array.isArray(data.items) ? data.items : []).map((item) => {
+            const sourceMeta = meta.get(String(item.term).toLowerCase()) || {};
+            return {
+              ...item,
+              source: sourceMeta.source || nextSource,
+              localWordId: sourceMeta.localWordId || null,
+              phonetic: sourceMeta.phonetic || '',
+            };
+          });
+          if (items.length === 0) throw new Error('没有生成出可用的语境题，请重试');
+          setPractice((previous) => ({
+            ...previous,
+            status: 'ready',
+            source: nextSource,
+            count: items.length,
+            items,
+            index: 0,
+            input: '',
+            results: [],
+            feedback: null,
+            busy: false,
+            error: '',
+            startedAt: Date.now(),
+            finishedAt: 0,
+          }));
+        } catch (err) {
+          setPractice((previous) => ({
+            ...previous,
+            status: 'idle',
+            error: '准备语境失败：' + (err && err.message ? err.message : String(err)),
+          }));
+        }
+      }
+
+      async function submitPractice() {
+        const current = practice.items[practice.index];
+        const answer = practice.input.trim();
+        if (!current || !answer || practice.busy || practice.feedback) return;
+        if (judgeLocal(answer, current) === true) {
+          setPractice((previous) => ({
+            ...previous,
+            feedback: { correct: true, feedback: '意思对。', canonical: current.meaning, answer, source: 'local' },
+          }));
+          return;
+        }
+        setPractice((previous) => ({ ...previous, busy: true }));
+        try {
+          const data = await postJson(
+            '/judge',
+            {
+              term: current.term,
+              sentence: current.sentence,
+              meaning: current.meaning,
+              accepted: current.accepted || [],
+              answer,
+            },
+            PRACTICE_API,
+          );
+          setPractice((previous) => ({
+            ...previous,
+            busy: false,
+            feedback: {
+              correct: data.correct === true,
+              feedback: String(data.feedback || ''),
+              canonical: String(data.canonical || current.meaning || ''),
+              answer,
+              source: 'ai',
+            },
+          }));
+        } catch (err) {
+          setPractice((previous) => ({
+            ...previous,
+            busy: false,
+            feedback: {
+              correct: false,
+              feedback: '判分服务没连上，先按错处理；如果意思对可以点「算我对」。',
+              canonical: current.meaning,
+              answer,
+              source: 'error',
+            },
+          }));
+        }
+      }
+
+      function recordPracticeResult(item, correct) {
+        if (!item.localWordId) return;
+        setState((previous) => ({
+          ...previous,
+          words: previous.words.map((word) =>
+            word.id === item.localWordId ? { ...word, review: rateReview(word.review, correct) } : word,
+          ),
+          updatedAt: Date.now(),
+        }));
+      }
+
+      function nextPractice() {
+        const current = practice.items[practice.index];
+        const feedback = practice.feedback;
+        if (!current || !feedback) return;
+        recordPracticeResult(current, feedback.correct);
+        const results = [
+          ...practice.results,
+          { ...current, answer: feedback.answer, correct: feedback.correct, feedback: feedback.feedback },
+        ];
+        if (practice.index + 1 >= practice.items.length) {
+          setPractice((previous) => ({
+            ...previous,
+            status: 'done',
+            results,
+            feedback: null,
+            finishedAt: Date.now(),
+          }));
+          return;
+        }
+        setPractice((previous) => ({
+          ...previous,
+          index: previous.index + 1,
+          input: '',
+          feedback: null,
+          results,
+        }));
+      }
+
+      function overridePractice() {
+        setPractice((previous) =>
+          previous.feedback
+            ? { ...previous, feedback: { ...previous.feedback, correct: true, feedback: '已按正确记录。' } }
+            : previous,
+        );
+      }
+
+      function retryWrongPractice() {
+        const wrong = practice.results.filter((item) => !item.correct);
+        if (wrong.length === 0) return;
+        startPractice({ source: practice.source, items: wrong });
+      }
+
+      function restartPractice() {
+        startPractice({ source: practice.source, count: practice.count });
+      }
+
+      function exitPractice() {
+        setPractice((previous) => ({
+          ...previous,
+          status: 'idle',
+          items: [],
+          index: 0,
+          input: '',
+          results: [],
+          feedback: null,
+          busy: false,
+          error: '',
+          startedAt: 0,
+          finishedAt: 0,
+        }));
+      }
+
+      React.useEffect(() => {
+        if (tab !== 'practice' || practice.status !== 'ready' || practice.feedback) return undefined;
+        const timer = setTimeout(() => practiceInputRef.current?.focus(), 40);
+        return () => clearTimeout(timer);
+      }, [tab, practice.status, practice.index, practice.feedback]);
+
       // ── 渲染片段 ────────────────────────────────────────────────
 
       const wordCount = state.words.length;
@@ -1142,6 +1471,16 @@ window.__ModuleLoader__.load({
         h('button', { className: 'wb-tab' + (tab === 'chat' ? ' wb-tab-on' : ''), role: 'tab', 'aria-selected': tab === 'chat' ? 'true' : 'false', onClick: () => setTab('chat') }, '对话讲解'),
         h(
           'button',
+          { className: 'wb-tab' + (tab === 'practice' ? ' wb-tab-on' : ''), role: 'tab', 'aria-selected': tab === 'practice' ? 'true' : 'false', onClick: () => setTab('practice') },
+          '默写',
+          practice.status === 'ready'
+            ? h('span', { className: 'wb-tab-badge' }, practice.index + 1 + '/' + practice.items.length)
+            : practice.status === 'loading'
+              ? h('span', { className: 'wb-tab-dot' })
+              : null,
+        ),
+        h(
+          'button',
           { className: 'wb-tab' + (tab === 'reading' ? ' wb-tab-on' : ''), role: 'tab', 'aria-selected': tab === 'reading' ? 'true' : 'false', onClick: () => setTab('reading') },
           '阅读理解',
           readingBusy ? h('span', { className: 'wb-tab-dot' }) : null,
@@ -1152,6 +1491,275 @@ window.__ModuleLoader__.load({
       const errorBar = error
         ? h('div', { className: 'wb-error', role: 'alert' }, h('span', null, error), h('button', { className: 'wb-link', onClick: () => setError('') }, '知道了'))
         : null;
+
+      function renderPracticeBody() {
+        if (practice.status === 'idle') {
+          return h(
+            'div',
+            { className: 'wb-scroll' },
+            h(
+              'div',
+              { className: 'wb-practice' },
+              h(
+                'div',
+                { className: 'wb-practice-card wb-practice-setup' },
+                h('h2', null, '结构化默写'),
+                h(
+                  'p',
+                  { className: 'wb-practice-intro' },
+                  '每题给一个英文句子，只考这个词在句中的中文意思。答对升一阶，答错回退；墨墨词只读，不写回。',
+                ),
+                h(
+                  'div',
+                  { className: 'wb-practice-row' },
+                  h('span', null, '词库'),
+                  h(
+                    'div',
+                    { className: 'wb-seg' },
+                    h(
+                      'button',
+                      {
+                        className: 'wb-seg-btn' + (practice.source === 'maimemo' ? ' wb-seg-on' : ''),
+                        onClick: () => setPractice((previous) => ({ ...previous, source: 'maimemo', error: '' })),
+                      },
+                      '墨墨今日 ',
+                      h('i', null, String(mmItems.length)),
+                    ),
+                    h(
+                      'button',
+                      {
+                        className: 'wb-seg-btn' + (practice.source === 'local' ? ' wb-seg-on' : ''),
+                        onClick: () => setPractice((previous) => ({ ...previous, source: 'local', error: '' })),
+                      },
+                      '我的词表 ',
+                      h('i', null, String(state.words.length)),
+                    ),
+                  ),
+                ),
+                h(
+                  'div',
+                  { className: 'wb-practice-row' },
+                  h('span', null, '数量'),
+                  h(
+                    'div',
+                    { className: 'wb-seg' },
+                    [5, 10, 15].map((size) =>
+                      h(
+                        'button',
+                        {
+                          key: size,
+                          className: 'wb-seg-btn' + (practice.count === size ? ' wb-seg-on' : ''),
+                          onClick: () => setPractice((previous) => ({ ...previous, count: size, error: '' })),
+                        },
+                        String(size),
+                      ),
+                    ),
+                  ),
+                ),
+                practice.error ? h('div', { className: 'wb-practice-error', role: 'alert' }, practice.error) : null,
+                h(
+                  'button',
+                  { className: 'wb-btn wb-btn-primary wb-practice-start', onClick: () => startPractice() },
+                  '开始默写',
+                ),
+                h(
+                  'p',
+                  { className: 'wb-hint' },
+                  practice.source === 'maimemo'
+                    ? '优先抽今日未完成的词和 STICKING 易忘词；墨墨今天没词时会提示。'
+                    : '优先抽今天到期的词，不够再用其他词补足。',
+                ),
+              ),
+            ),
+          );
+        }
+
+        if (practice.status === 'loading') {
+          return h(
+            'div',
+            { className: 'wb-scroll' },
+            h(
+              'div',
+              { className: 'wb-practice' },
+              h(
+                'div',
+                { className: 'wb-practice-card wb-practice-loading' },
+                h(SparkIcon, { size: 28 }),
+                h('h2', null, '正在为 ' + practice.count + ' 个词准备语境…'),
+                h('p', { className: 'wb-hint' }, '会为每个词写一个英文句子，并锁定一个中文义项；通常几秒。'),
+              ),
+            ),
+          );
+        }
+
+        if (practice.status === 'done') {
+          const results = practice.results;
+          const total = results.length;
+          const correct = results.filter((item) => item.correct).length;
+          const wrong = results.filter((item) => !item.correct);
+          const rate = total > 0 ? Math.round((correct / total) * 100) : 0;
+          return h(
+            'div',
+            { className: 'wb-scroll' },
+            h(
+              'div',
+              { className: 'wb-practice' },
+              h(
+                'div',
+                { className: 'wb-practice-card wb-practice-done' },
+                h('h2', null, '这一轮做完了'),
+                h('div', { className: 'wb-score' }, h('b', null, String(correct)), h('span', null, ' / ' + total)),
+                h(
+                  'p',
+                  { className: 'wb-hint' },
+                  '正确率 ' +
+                    rate +
+                    '% · 用时 ' +
+                    formatDuration((practice.finishedAt || Date.now()) - (practice.startedAt || Date.now())),
+                ),
+                wrong.length > 0
+                  ? h(
+                      'div',
+                      { className: 'wb-wrong' },
+                      h('b', null, '错词 ' + wrong.length + ' 个'),
+                      wrong.map((item, index) =>
+                        h(
+                          'div',
+                          { className: 'wb-wrong-row', key: item.term + index },
+                          h('b', null, item.term),
+                          h('span', null, item.meaning),
+                          h('em', null, '你写的：' + (item.answer || '（空）')),
+                        ),
+                      ),
+                    )
+                  : h('p', { className: 'wb-practice-allgood' }, '全对，漂亮。'),
+                h(
+                  'div',
+                  { className: 'wb-practice-actions' },
+                  wrong.length > 0
+                    ? h('button', { className: 'wb-btn', onClick: retryWrongPractice }, '重练错词')
+                    : null,
+                  h('button', { className: 'wb-btn wb-btn-primary', onClick: restartPractice }, '再来一组'),
+                  h('button', { className: 'wb-btn', onClick: exitPractice }, '结束'),
+                ),
+                h(
+                  'p',
+                  { className: 'wb-footnote' },
+                  practice.source === 'local'
+                    ? '本地词已经按这轮结果更新了复习排期。'
+                    : '墨墨词是只读的，这轮结果只留在本地，不会改动墨墨。',
+                ),
+              ),
+            ),
+          );
+        }
+
+        const current = practice.items[practice.index];
+        if (!current) return null;
+        const feedback = practice.feedback;
+        const correctSoFar = practice.results.filter((item) => item.correct).length + (feedback && feedback.correct ? 1 : 0);
+        const progress = practice.items.length > 0 ? Math.round(((practice.index + (feedback ? 1 : 0)) / practice.items.length) * 100) : 0;
+        return h(
+          'div',
+          { className: 'wb-scroll' },
+          h(
+            'div',
+            { className: 'wb-practice' },
+            h(
+              'div',
+              { className: 'wb-practice-head' },
+              h('span', null, '第 ' + (practice.index + 1) + ' / ' + practice.items.length + ' 题'),
+              h('span', { className: 'wb-hint' }, (practice.source === 'maimemo' ? '墨墨今日' : '我的词表') + ' · 已对 ' + correctSoFar),
+              h('button', { className: 'wb-link', onClick: exitPractice }, '结束'),
+            ),
+            h('div', { className: 'wb-progress' }, h('span', { style: { width: progress + '%' } })),
+            h(
+              'div',
+              { className: 'wb-practice-card' },
+              h('p', { className: 'wb-context' }, renderContext(current.sentence, current.term)),
+              h(
+                'div',
+                { className: 'wb-target' },
+                h('b', null, current.term),
+                current.phonetic ? h('em', null, current.phonetic) : null,
+              ),
+              h(
+                'p',
+                { className: 'wb-practice-q' },
+                '句中这个 ',
+                h('b', null, current.term),
+                ' 是什么意思？',
+              ),
+              h(
+                'div',
+                { className: 'wb-answer-row' },
+                h('input', {
+                  ref: practiceInputRef,
+                  className: 'wb-practice-input',
+                  value: practice.input,
+                  disabled: Boolean(feedback) || practice.busy,
+                  placeholder: '写中文意思，同义词也算对',
+                  onChange: (event) => setPractice((previous) => ({ ...previous, input: event.target.value })),
+                  onKeyDown: (event) => {
+                    if (event.key === 'Enter' && !event.nativeEvent?.isComposing) {
+                      event.preventDefault();
+                      if (feedback) nextPractice();
+                      else submitPractice();
+                    }
+                  },
+                }),
+                h(
+                  'button',
+                  {
+                    className: 'wb-btn wb-btn-primary',
+                    onClick: submitPractice,
+                    disabled: !practice.input.trim() || Boolean(feedback) || practice.busy,
+                  },
+                  practice.busy ? '判分中…' : '提交',
+                ),
+              ),
+              feedback
+                ? h(
+                    'div',
+                    { className: 'wb-feedback ' + (feedback.correct ? 'wb-feedback-ok' : 'wb-feedback-bad') },
+                    h(
+                      'div',
+                      { className: 'wb-feedback-line' },
+                      h('b', null, feedback.correct ? '✓ 对了' : '✗ 差一点'),
+                      h('span', null, feedback.feedback || ''),
+                    ),
+                    h(
+                      'div',
+                      { className: 'wb-feedback-answer' },
+                      h('span', null, '句中意思：'),
+                      h('b', null, feedback.canonical || current.meaning),
+                      current.translation ? h('span', { className: 'wb-feedback-trans' }, current.translation) : null,
+                    ),
+                    h(
+                      'div',
+                      { className: 'wb-feedback-actions' },
+                      feedback.correct
+                        ? null
+                        : h('button', { className: 'wb-btn', onClick: overridePractice }, '算我对'),
+                      h(
+                        'button',
+                        { className: 'wb-btn wb-btn-primary', onClick: nextPractice },
+                        practice.index + 1 >= practice.items.length ? '看结果' : '下一题',
+                      ),
+                    ),
+                  )
+                : null,
+            ),
+            h(
+              'p',
+              { className: 'wb-footnote' },
+              practice.source === 'maimemo'
+                ? '墨墨词只读：这轮结果不会写回墨墨。'
+                : '本地词会在进入下一题时按对错更新复习排期。',
+            ),
+          ),
+        );
+      }
 
       let body = null;
       if (tab === 'chat') {
@@ -1226,6 +1834,8 @@ window.__ModuleLoader__.load({
             ),
           ),
         );
+      } else if (tab === 'practice') {
+        body = renderPracticeBody();
       } else if (readingBusy) {
         body = h(
           'div',
@@ -1518,6 +2128,57 @@ window.__ModuleLoader__.load({
       .wb-side-rail-count { font-size:10px; color:var(--dsw-alias-label-tertiary); }
       .wb-maincol { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
       .wb-maincol .wb-tabs { margin-top:0; }
+      .wb-tab-badge { font-size:9px; line-height:15px; padding:0 5px; border-radius:999px; background:var(--dsw-alias-bg-layer-2); color:var(--dsw-alias-label-secondary); font-weight:500; }
+      .wb-practice { max-width:760px; margin:0 auto; padding:14px 2px 30px; }
+      .wb-practice-card { border:.5px solid var(--dsw-alias-border-l3); border-radius:16px; background:var(--dsw-alias-bg-layer-1); padding:18px clamp(14px,3vw,24px); }
+      .wb-practice-setup h2, .wb-practice-done h2, .wb-practice-loading h2 { margin:0 0 6px; font-size:18px; font-weight:600; }
+      .wb-practice-intro { margin:0 0 4px; color:var(--dsw-alias-label-secondary); font-size:13px; line-height:1.7; }
+      .wb-practice-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:14px; }
+      .wb-practice-row > span { width:36px; flex:none; color:var(--dsw-alias-label-tertiary); font-size:12px; }
+      .wb-seg { display:inline-flex; gap:3px; padding:3px; border-radius:9px; background:var(--dsw-alias-bg-layer-2); }
+      .wb-seg-btn { border:0; background:0 0; color:var(--dsw-alias-label-tertiary); font:inherit; font-size:11px; line-height:20px; padding:1px 9px; border-radius:6px; cursor:pointer; white-space:nowrap; }
+      .wb-seg-btn i { font-style:normal; font-size:9.5px; opacity:.7; }
+      .wb-seg-on { background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); box-shadow:0 0 0 .5px var(--dsw-alias-border-l3); }
+      .wb-practice-start { margin-top:18px; }
+      .wb-practice-error { margin-top:12px; border-radius:8px; padding:8px 10px; font-size:12px; color:var(--dsw-alias-state-error-primary); background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 9%, transparent); }
+      .wb-practice-loading { text-align:center; padding:36px 20px; color:var(--dsw-alias-label-tertiary); }
+      .wb-practice-loading h2 { color:var(--dsw-alias-label-secondary); margin-top:10px; }
+      .wb-practice-head { display:flex; align-items:center; gap:10px; margin:0 0 8px; font-size:12px; color:var(--dsw-alias-label-tertiary); }
+      .wb-practice-head .wb-link { margin-left:auto; }
+      .wb-progress { height:4px; border-radius:2px; background:var(--dsw-alias-bg-layer-2); overflow:hidden; margin-bottom:14px; }
+      .wb-progress span { display:block; height:100%; border-radius:2px; background:var(--dsw-alias-brand-primary); transition:width .18s ease; }
+      .wb-context { margin:0 0 16px; font-family:Georgia,"Times New Roman",serif; font-size:17px; line-height:1.8; }
+      .wb-mark { background:color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, transparent); color:inherit; border-radius:4px; padding:0 3px; font-weight:600; }
+      .wb-target { display:flex; align-items:baseline; gap:8px; font-size:21px; font-weight:600; line-height:1.3; }
+      .wb-target em { font-style:normal; font-size:12px; font-weight:400; color:var(--dsw-alias-label-tertiary); }
+      .wb-practice-q { margin:8px 0 10px; color:var(--dsw-alias-label-secondary); font-size:13px; }
+      .wb-answer-row { display:flex; gap:8px; align-items:stretch; }
+      .wb-practice-input { flex:1; min-width:0; min-height:40px; box-sizing:border-box; border:.5px solid var(--dsw-alias-border-l2); border-radius:10px; background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; font-size:14px; padding:8px 12px; outline:none; }
+      .wb-practice-input:focus { border-color:var(--dsw-alias-brand-primary); }
+      .wb-practice-input:disabled { opacity:.65; }
+      .wb-feedback { margin-top:14px; border-radius:10px; padding:10px 12px; font-size:13px; line-height:1.65; }
+      .wb-feedback-ok { background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent); }
+      .wb-feedback-bad { background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent); }
+      .wb-feedback-line { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+      .wb-feedback-line b { flex:none; }
+      .wb-feedback-ok .wb-feedback-line b { color:var(--dsw-alias-state-success-primary); }
+      .wb-feedback-bad .wb-feedback-line b { color:var(--dsw-alias-state-error-primary); }
+      .wb-feedback-line span { color:var(--dsw-alias-label-secondary); }
+      .wb-feedback-answer { display:flex; align-items:baseline; gap:6px; flex-wrap:wrap; margin-top:6px; color:var(--dsw-alias-label-secondary); }
+      .wb-feedback-answer b { color:var(--dsw-alias-label-primary); }
+      .wb-feedback-trans { display:block; width:100%; color:var(--dsw-alias-label-tertiary); font-size:12px; }
+      .wb-feedback-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:10px; }
+      .wb-score { display:flex; align-items:baseline; gap:4px; margin:8px 0 2px; color:var(--dsw-alias-label-secondary); }
+      .wb-score b { font-size:38px; line-height:1.1; color:var(--dsw-alias-label-primary); }
+      .wb-score span { font-size:14px; }
+      .wb-wrong { margin-top:16px; border-top:.5px solid var(--dsw-alias-border-l4); padding-top:12px; }
+      .wb-wrong > b { font-size:12px; color:var(--dsw-alias-label-secondary); }
+      .wb-wrong-row { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; margin-top:8px; font-size:12.5px; }
+      .wb-wrong-row b { font-size:14px; }
+      .wb-wrong-row span { color:var(--dsw-alias-label-secondary); }
+      .wb-wrong-row em { font-style:normal; color:var(--dsw-alias-label-tertiary); }
+      .wb-practice-allgood { margin-top:16px; color:var(--dsw-alias-state-success-primary); font-size:13px; }
+      .wb-practice-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:18px; }
       @media (max-width:700px) {
         .wb-side { width:clamp(132px,32%,186px); }
         .wb-wmean { font-size:11px; }
@@ -1578,6 +2239,9 @@ window.__ModuleLoader__.load({
         normalizeWords,
         richText,
         WordbookPanel,
+        judgeLocal,
+        normalizeZh,
+        renderContext,
         REVIEW_INTERVALS,
         normalizeReview,
         rateReview,

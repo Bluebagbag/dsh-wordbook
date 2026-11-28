@@ -77,7 +77,7 @@ assert.ok(output.includes('词卷'), '左侧词卷')
 assert.ok(output.includes('添加单词'), '添加按钮')
 assert.ok(output.includes('还没有单词'), '空词表提示')
 assert.ok(output.includes('今日任务') && output.includes('今天没有到期复习'), '今日任务卡片')
-assert.ok(output.includes('对话讲解') && output.includes('阅读理解'), '右侧标签页')
+assert.ok(output.includes('对话讲解') && output.includes('默写') && output.includes('阅读理解'), '右侧标签页')
 
 // 2. 有词：释义默认遮住，点开才显示
 storage.set('dsh-wordbook:state:v1', JSON.stringify({
@@ -122,5 +122,35 @@ assert.ok(output.includes('学习 5 分钟') && output.includes('易忘 1 个'),
 assert.ok(output.includes('generate') && output.includes('motto'), '墨墨词条')
 assert.ok(output.includes('整句') && output.includes('词义'), '阶段标记')
 assert.ok(output.includes('点击显示'), '墨墨释义默认遮住')
+
+
+// 5. 结构化默写：设置页、答题页、结果页
+const practiceIdle = { status: 'idle', source: 'local', count: 10, items: [], index: 0, input: '', results: [], feedback: null, busy: false, error: '', startedAt: 0 }
+output = render({ __testPractice: practiceIdle })
+assert.ok(output.includes('结构化默写') && output.includes('开始默写'), '默写设置页')
+assert.ok(output.includes('墨墨今日') && output.includes('我的词表'), '词库切换')
+assert.ok(output.includes('10'), '数量选择')
+
+const practiceReady = {
+  ...practiceIdle,
+  status: 'ready',
+  count: 1,
+  startedAt: Date.now(),
+  items: [{ term: 'challenge', sentence: 'The new job is a real challenge for her.', meaning: '挑战', accepted: ['挑战', '难题'], translation: '这份新工作对她来说是个真正的挑战。', source: 'local', localWordId: 'w1', phonetic: '/ˈtʃælɪndʒ/' }],
+}
+output = render({ __testPractice: practiceReady })
+assert.ok(output.includes('第 1 / 1 题') && output.includes('challenge'), '默写答题页')
+assert.ok(output.includes('The new job is a real') && output.includes('challenge') && output.includes('是什么意思'), '语境句和提问')
+
+const practiceDone = {
+  ...practiceIdle,
+  status: 'done',
+  startedAt: Date.now() - 30000,
+  finishedAt: Date.now(),
+  results: [{ term: 'challenge', meaning: '挑战', answer: '质疑', correct: false, feedback: '句中指挑战' }],
+}
+output = render({ __testPractice: practiceDone })
+assert.ok(output.includes('这一轮做完了') && output.includes('正确率 0%'), '默写结果页')
+assert.ok(output.includes('错词 1 个') && output.includes('你写的：质疑'), '错词清单')
 
 console.log('wordbook render: OK')
