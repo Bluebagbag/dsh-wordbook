@@ -13,6 +13,8 @@ Most flashcard apps keep your words inside their own schedule. This plugin puts 
 - **Spaced repetition**: an Ebbinghaus-style ladder from 10 minutes to 90 days. Rate a word **Remembered** to move it up, or **Forgot** to reset it.
 - **AI vocabulary coach**: active recall first, one or two words at a time, corrections that make you say it again. Quizzes are **English → Chinese fill-in**, never Chinese multiple choice.
 - **Structured dictation**: pick 5/10/15 words, read an English context sentence, and type the target word's Chinese meaning **as used in that sentence**. Each round ends with a score, wrong-word list, and a per-round report.
+- **Settings panel**: Maimemo token, default dictation source/count, reading difficulty, and daily goal — all editable in the UI.
+- **Learning report**: today's dictation count, accuracy, streak, 14-day bar chart, and most-missed words, exported as a saveable PNG card.
 - **Reading comprehension**: uses **all of today's Maimemo words** when available. Passage length scales with the word count, and the number of questions drops for long lists so every word fits.
 - **Optional Maimemo sync (read-only)**: today's progress, daily words, study counts, and `STICKING` / `WELL_FAMILIAR` tags. The plugin never writes to your Maimemo account.
 
@@ -40,6 +42,7 @@ Most flashcard apps keep your words inside their own schedule. This plugin puts 
 | `plugins/dsh-maimemo` | Read-only bridge to the Maimemo Open API |
 | `plugins/dsh-reading` | Reading generator that scales the passage to the word count |
 | `plugins/dsh-practice` | Structured dictation: context generation and Chinese semantic judging |
+| `plugins/dsh-wordbook-config` | Local bridge for saving the Maimemo token from the settings panel (never returns it) |
 
 ## Install
 
@@ -53,9 +56,9 @@ bash install.sh
 
 `install.sh` is idempotent. It:
 
-1. links the four plugins into the profile's `node_modules/`;
+1. links the five plugins into the profile's `node_modules/`;
 2. adds `link:` dependencies to the profile's `package.json`;
-3. appends the four loader rows to `cordis.patch.yml` (skips existing ones);
+3. appends the five loader rows to `cordis.patch.yml` (skips existing ones);
 4. creates an empty `$DSH_HOME/maimemo/config.json` template (never overwrites an existing file).
 
 Refresh the web UI once after installing. If the host half does not appear, restart `dsh` and refresh again.

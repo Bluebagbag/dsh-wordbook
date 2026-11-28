@@ -1,0 +1,4 @@
+# dsh-wordbook-config 的宿主插件行。
+- insert:
+    - id: wordbook-config
+      name: dsh-wordbook-config

@@ -1,6 +1,6 @@
 {
   "name": "dsh-wordbook",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "背单词：左侧栏入口，自己录入词表、本地保存，用 DSH 当前模型聊天式讲解，并可一键生成包含这些词的英语阅读理解题。",

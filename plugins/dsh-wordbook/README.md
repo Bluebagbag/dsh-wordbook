@@ -16,6 +16,7 @@ DSH 客户端 + 宿主半边：左侧栏「背单词」面板。
 - `dsh-maimemo`：墨墨只读桥（可选）
 - `dsh-reading`：长词表阅读题生成
 - `dsh-practice`：结构化默写的语境生成和语义判分
+- `dsh-wordbook-config`：设置面板保存墨墨 token
 - DSH 当前默认模型（`ctx.llm`）
 
 ## 文件

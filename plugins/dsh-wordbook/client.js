@@ -19,9 +19,21 @@ window.__ModuleLoader__.load({
     const MM_API = '/dsh-maimemo/api';
     const PRACTICE_API = '/dsh-practice/api';
     const LS_KEY = 'dsh-wordbook:state:v1';
-    const EMPTY_STATE = { version: 1, words: [], chat: [], reading: null, updatedAt: 0 };
+    const EMPTY_STATE = { version: 1, words: [], chat: [], reading: null, history: [], updatedAt: 0 };
     const DIFFICULTIES = ['初中', '高中', '四级', '六级', '考研'];
     const SIDE_KEY = 'dsh-wordbook:side:v1';
+    const SETTINGS_KEY = 'dsh-wordbook:settings:v1';
+    const DEFAULT_SETTINGS = { dailyGoal: 20, practiceSource: 'maimemo', practiceCount: 10, readingDifficulty: '高中' };
+    const SETTINGS_API = '/dsh-wordbook-config/api';
+
+    function loadSettings() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+        return { ...DEFAULT_SETTINGS, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+      } catch {
+        return { ...DEFAULT_SETTINGS };
+      }
+    }
 
     // 宿主旧版本没有 /lookup 时，用聊天接口也能查词典；这段规则同时给旧宿主补上「带练式」提问。
     const COACH_RULES = `【这一轮请严格按「词汇教练」的方式回答，别当词典】
@@ -148,11 +160,21 @@ window.__ModuleLoader__.load({
           content: String(message.content),
           ts: Number(message.ts) || Date.now(),
         }));
+      const history = (Array.isArray(raw.history) ? raw.history : [])
+        .filter((entry) => entry && typeof entry === 'object' && String(entry.term ?? '').trim() && Number(entry.ts) > 0)
+        .slice(-1200)
+        .map((entry) => ({
+          ts: Number(entry.ts),
+          term: String(entry.term).slice(0, 120),
+          correct: entry.correct === true,
+          source: entry.source === 'maimemo' ? 'maimemo' : 'local',
+        }));
       return {
         version: 1,
         words: normalizeWords(raw.words),
         chat,
         reading: raw.reading && typeof raw.reading === 'object' ? raw.reading : null,
+        history,
         updatedAt: Number(raw.updatedAt) || 0,
       };
     }
@@ -302,6 +324,114 @@ window.__ModuleLoader__.load({
       return minutes + ' 分 ' + (rest > 0 ? rest + ' 秒' : '');
     }
 
+    /** 画一张 1080×1350 的学习报告卡片，返回 data URL。 */
+    function drawReport(canvas, data) {
+      const W = 1080;
+      const H = 1350;
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      const font = (size, weight = 500) => weight + ' ' + size + 'px "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif';
+      const roundRect = (x, y, w, h, r) => {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+      };
+      ctx.fillStyle = '#f5f4ef';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#4338ca';
+      ctx.fillRect(0, 0, W, 12);
+
+      ctx.fillStyle = '#17171a';
+      ctx.font = font(56, 700);
+      ctx.fillText('今日学习报告', 80, 140);
+      ctx.fillStyle = '#77777f';
+      ctx.font = font(28, 400);
+      ctx.fillText(data.date, 82, 190);
+
+      ctx.fillStyle = '#ffffff';
+      roundRect(60, 240, 960, 350, 28);
+      ctx.fill();
+      ctx.fillStyle = '#77777f';
+      ctx.font = font(26, 400);
+      ctx.fillText('今天默写', 110, 310);
+      ctx.fillText('正确率', 650, 310);
+
+      ctx.fillStyle = '#17171a';
+      ctx.font = font(108, 700);
+      const countText = String(data.todayCount);
+      ctx.fillText(countText, 105, 450);
+      const countWidth = ctx.measureText(countText).width;
+      ctx.font = font(28, 400);
+      ctx.fillStyle = '#77777f';
+      ctx.fillText('题', 105 + countWidth + 16, 450);
+
+      ctx.fillStyle = '#16a34a';
+      ctx.font = font(88, 700);
+      ctx.fillText(data.accuracy + '%', 645, 440);
+
+      const stats = [
+        ['连续学习', data.streak + ' 天'],
+        ['今日目标', data.todayCount + ' / ' + data.goal],
+        ['本地待复习', data.due + ' 个'],
+        ['墨墨今日', data.mmFinished + ' / ' + data.mmTotal],
+      ];
+      stats.forEach(([label, value], index) => {
+        const x = 80 + index * 235;
+        ctx.fillStyle = '#77777f';
+        ctx.font = font(22, 400);
+        ctx.fillText(label, x, 700);
+        ctx.fillStyle = '#17171a';
+        ctx.font = font(38, 700);
+        ctx.fillText(value, x, 750);
+      });
+
+      ctx.fillStyle = '#77777f';
+      ctx.font = font(26, 400);
+      ctx.fillText('最近 14 天', 80, 850);
+      const max = Math.max(1, ...data.bars.map((bar) => bar.count));
+      data.bars.forEach((bar, index) => {
+        const x = 80 + index * 65;
+        const height = Math.max(6, Math.round((bar.count / max) * 150));
+        ctx.fillStyle = bar.count > 0 ? '#4338ca' : '#e3e2dc';
+        roundRect(x, 1030 - height, 42, height, 8);
+        ctx.fill();
+        if (index % 2 === 0) {
+          ctx.fillStyle = '#9a9aa1';
+          ctx.font = font(16, 400);
+          ctx.fillText(bar.label, x, 1062);
+        }
+      });
+
+      ctx.fillStyle = '#77777f';
+      ctx.font = font(26, 400);
+      ctx.fillText('最常错', 80, 1145);
+      if (data.weak.length === 0) {
+        ctx.fillStyle = '#16a34a';
+        ctx.font = font(30, 500);
+        ctx.fillText('今天没有错词，漂亮。', 80, 1195);
+      } else {
+        data.weak.forEach((item, index) => {
+          const y = 1192 + index * 42;
+          ctx.fillStyle = '#17171a';
+          ctx.font = font(30, 600);
+          ctx.fillText(item.term, 80, y);
+          ctx.fillStyle = '#77777f';
+          ctx.font = font(24, 400);
+          ctx.fillText('错 ' + item.count + ' 次', 80 + ctx.measureText(item.term).width + 24, y);
+        });
+      }
+
+      ctx.fillStyle = '#9a9aa1';
+      ctx.font = font(20, 400);
+      ctx.fillText('DSH 背单词 · 数据只保存在本机', 80, 1290);
+      return canvas.toDataURL('image/png');
+    }
+
     // ── 2. 图标 ───────────────────────────────────────────────────────
 
     function BookIcon({ size = 16 }) {
@@ -345,6 +475,45 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function ChartIcon({ size = 16 }) {
+      return h(
+        'svg',
+        {
+          width: size,
+          height: size,
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.7,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          'aria-hidden': 'true',
+          focusable: 'false',
+        },
+        h('path', { d: 'M4 20V10M10 20V4M16 20v-7M22 20H2' }),
+      );
+    }
+
+    function GearIcon({ size = 16 }) {
+      return h(
+        'svg',
+        {
+          width: size,
+          height: size,
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.7,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          'aria-hidden': 'true',
+          focusable: 'false',
+        },
+        h('circle', { cx: 12, cy: 12, r: 3.2 }),
+        h('path', { d: 'M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.37a1.7 1.7 0 0 0-1 .63 1.7 1.7 0 0 0-.36 1.06V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.23 15a1.7 1.7 0 0 0-.63-1 1.7 1.7 0 0 0-1.06-.36H2.4a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.6 4.23a1.7 1.7 0 0 0 1-.63 1.7 1.7 0 0 0 .36-1.06V2.4a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.37 8.4c.18.36.42.68.73.93.3.24.67.37 1.06.39H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.28z' }),
+      );
+    }
+
     function SidebarIcon({ size = 16 }) {
       return h(BookIcon, { size });
     }
@@ -354,6 +523,8 @@ window.__ModuleLoader__.load({
     function WordbookPanel(props) {
       const testMaimemo = props && props.__testMaimemo;
       const testPractice = props && props.__testPractice;
+      const testSettingsOpen = props && props.__testSettingsOpen;
+      const testReportOpen = props && props.__testReportOpen;
       const [state, setState] = React.useState(loadLocal);
       const [ready, setReady] = React.useState(false);
       const [tab, setTab] = React.useState(() => (testPractice ? 'practice' : 'chat'));
@@ -363,7 +534,15 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false);
       const [readingBusy, setReadingBusy] = React.useState(false);
       const [error, setError] = React.useState('');
-      const [difficulty, setDifficulty] = React.useState('高中');
+      const [settings, setSettings] = React.useState(loadSettings);
+      const [settingsOpen, setSettingsOpen] = React.useState(Boolean(testSettingsOpen));
+      const [reportOpen, setReportOpen] = React.useState(Boolean(testReportOpen));
+      const [reportImage, setReportImage] = React.useState('');
+      const [tokenConfigured, setTokenConfigured] = React.useState(null);
+      const [tokenDraft, setTokenDraft] = React.useState('');
+      const [tokenBusy, setTokenBusy] = React.useState(false);
+      const [tokenMessage, setTokenMessage] = React.useState('');
+      const [difficulty, setDifficulty] = React.useState(() => settings.readingDifficulty);
       const [answers, setAnswers] = React.useState({});
       const [showAll, setShowAll] = React.useState(false);
       const [revealed, setRevealed] = React.useState({});
@@ -382,8 +561,8 @@ window.__ModuleLoader__.load({
         () =>
           testPractice || {
             status: 'idle',
-            source: 'maimemo',
-            count: 10,
+            source: settings.practiceSource,
+            count: settings.practiceCount,
             items: [],
             index: 0,
             input: '',
@@ -404,6 +583,7 @@ window.__ModuleLoader__.load({
       const scrollRef = React.useRef(null);
       const composerRef = React.useRef(null);
       const practiceInputRef = React.useRef(null);
+      const reportCanvasRef = React.useRef(null);
       const stateRef = React.useRef(state);
       stateRef.current = state;
 
@@ -452,6 +632,40 @@ window.__ModuleLoader__.load({
           /* ignore */
         }
       }, [sideOpen]);
+
+      React.useEffect(() => {
+        try {
+          localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        } catch {
+          /* ignore */
+        }
+      }, [settings]);
+
+      React.useEffect(() => {
+        if (!settingsOpen) return undefined;
+        let alive = true;
+        fetch(SETTINGS_API + '/maimemo')
+          .then((response) => response.json())
+          .then((data) => {
+            if (alive) setTokenConfigured(Boolean(data && data.configured));
+          })
+          .catch(() => {
+            if (alive) setTokenConfigured(false);
+          });
+        return () => {
+          alive = false;
+        };
+      }, [settingsOpen]);
+
+      React.useEffect(() => {
+        if (!reportOpen) return undefined;
+        const timer = setTimeout(() => {
+          const canvas = reportCanvasRef.current;
+          if (!canvas) return;
+          setReportImage(drawReport(canvas, buildReportData()));
+        }, 30);
+        return () => clearTimeout(timer);
+      }, [reportOpen, state.history.length, settings.dailyGoal, maimemo.status, maimemo.items.length, state.words.length]);
 
       // 词表里缺释义/音标的词，自动查一次（模型出词典条目）。
       const wordKey = state.words.map((word) => word.term).join('\u0000');
@@ -1017,6 +1231,7 @@ window.__ModuleLoader__.load({
         const feedback = practice.feedback;
         if (!current || !feedback) return;
         recordPracticeResult(current, feedback.correct);
+        logPracticeResult(current, feedback.correct);
         const results = [
           ...practice.results,
           { ...current, answer: feedback.answer, correct: feedback.correct, feedback: feedback.feedback },
@@ -1074,6 +1289,119 @@ window.__ModuleLoader__.load({
         }));
       }
 
+      function openSettings() {
+        setTokenMessage('');
+        setSettingsOpen(true);
+      }
+
+      function openReport() {
+        setReportImage('');
+        setReportOpen(true);
+      }
+
+      function updateSettings(patch) {
+        const next = { ...settings, ...patch };
+        setSettings(next);
+        if (Object.prototype.hasOwnProperty.call(patch, 'readingDifficulty')) setDifficulty(next.readingDifficulty);
+        setPractice((previous) =>
+          previous.status === 'idle'
+            ? { ...previous, source: next.practiceSource, count: next.practiceCount }
+            : previous,
+        );
+      }
+
+      async function saveToken() {
+        const token = tokenDraft.trim();
+        if (!token) {
+          setTokenMessage('先粘贴一个 token。');
+          return;
+        }
+        setTokenBusy(true);
+        setTokenMessage('');
+        try {
+          const data = await postJson('/maimemo', { token }, SETTINGS_API);
+          setTokenConfigured(Boolean(data.configured));
+          setTokenDraft('');
+          setTokenMessage('已保存，下一次请求墨墨就会用新 token。');
+        } catch (err) {
+          setTokenMessage('保存失败：' + (err && err.message ? err.message : String(err)));
+        } finally {
+          setTokenBusy(false);
+        }
+      }
+
+      async function clearToken() {
+        if (typeof window !== 'undefined' && !window.confirm('清除本机保存的墨墨 token？')) return;
+        setTokenBusy(true);
+        setTokenMessage('');
+        try {
+          const data = await postJson('/maimemo', { token: '' }, SETTINGS_API);
+          setTokenConfigured(Boolean(data.configured));
+          setTokenDraft('');
+          setTokenMessage('已清除。');
+        } catch (err) {
+          setTokenMessage('清除失败：' + (err && err.message ? err.message : String(err)));
+        } finally {
+          setTokenBusy(false);
+        }
+      }
+
+      function logPracticeResult(item, correct) {
+        setState((previous) => ({
+          ...previous,
+          history: [
+            ...(Array.isArray(previous.history) ? previous.history : []),
+            { ts: Date.now(), term: item.term, correct: Boolean(correct), source: item.source === 'maimemo' ? 'maimemo' : 'local' },
+          ].slice(-1200),
+          updatedAt: Date.now(),
+        }));
+      }
+
+      function buildReportData() {
+        const now = Date.now();
+        const history = Array.isArray(state.history) ? state.history : [];
+        const today = startOfDay(now);
+        const todayHistory = history.filter((entry) => entry.ts >= today);
+        const correct = todayHistory.filter((entry) => entry.correct).length;
+        const days = new Set(history.map((entry) => new Date(entry.ts).toDateString()));
+        const cursor = new Date(now);
+        if (!days.has(cursor.toDateString())) cursor.setDate(cursor.getDate() - 1);
+        let streak = 0;
+        while (days.has(cursor.toDateString())) {
+          streak += 1;
+          cursor.setDate(cursor.getDate() - 1);
+        }
+        const bars = [];
+        for (let i = 13; i >= 0; i -= 1) {
+          const date = new Date(now - i * DAY_MS);
+          const key = date.toDateString();
+          bars.push({
+            label: date.getMonth() + 1 + '/' + date.getDate(),
+            count: history.filter((entry) => new Date(entry.ts).toDateString() === key).length,
+          });
+        }
+        const wrong = new Map();
+        for (const entry of history.slice(-800)) {
+          if (!entry.correct) wrong.set(entry.term, (wrong.get(entry.term) || 0) + 1);
+        }
+        const weak = [...wrong.entries()]
+          .sort((left, right) => right[1] - left[1])
+          .slice(0, 3)
+          .map(([term, count]) => ({ term, count }));
+        return {
+          date: new Date(now).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }),
+          todayCount: todayHistory.length,
+          accuracy: todayHistory.length > 0 ? Math.round((correct / todayHistory.length) * 100) : 0,
+          streak,
+          goal: Number(settings.dailyGoal) || 20,
+          due: dueWords.length,
+          mmFinished: mmProgress.finished || 0,
+          mmTotal: mmProgress.total || mmItems.length || 0,
+          bars,
+          weak,
+        };
+      }
+
       React.useEffect(() => {
         if (tab !== 'practice' || practice.status !== 'ready' || practice.feedback) return undefined;
         const timer = setTimeout(() => practiceInputRef.current?.focus(), 40);
@@ -1123,6 +1451,8 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { className: 'wb-head-actions' },
+          h('button', { className: 'wb-icon-btn', onClick: openReport, title: '学习报告', 'aria-label': '学习报告' }, h(ChartIcon, { size: 17 })),
+          h('button', { className: 'wb-icon-btn', onClick: openSettings, title: '设置', 'aria-label': '设置' }, h(GearIcon, { size: 17 })),
           h(
             'button',
             { className: 'wb-btn wb-btn-primary', onClick: makeReading, disabled: readingBusy || readingWords.length === 0 || readingLoading, title: readingLoading ? '正在读取墨墨今日词…' : readingWords.length === 0 ? '先添加单词' : '用' + readingSourceLabel + '出一篇阅读理解' },
@@ -1963,6 +2293,194 @@ window.__ModuleLoader__.load({
         );
       }
 
+      function renderSettingsModal() {
+        return h(
+          'div',
+          { className: 'wb-modal-mask', onClick: () => setSettingsOpen(false) },
+          h(
+            'div',
+            { className: 'wb-modal', onClick: (event) => event.stopPropagation() },
+            h(
+              'div',
+              { className: 'wb-modal-head' },
+              h('h2', null, '设置'),
+              h('button', { className: 'wb-modal-close', onClick: () => setSettingsOpen(false), 'aria-label': '关闭' }, '×'),
+            ),
+            h(
+              'section',
+              { className: 'wb-set-group' },
+              h('h3', null, '墨墨 API'),
+              h(
+                'div',
+                { className: 'wb-set-row' },
+                h('span', { className: 'wb-set-label' }, '状态'),
+                h('b', { className: 'wb-set-value' }, tokenConfigured === null ? '检查中…' : tokenConfigured ? '已配置' : '未配置'),
+              ),
+              h('input', {
+                className: 'wb-practice-input wb-set-input',
+                type: 'password',
+                value: tokenDraft,
+                placeholder: '粘贴新的 token（已保存的不会显示）',
+                onChange: (event) => setTokenDraft(event.target.value),
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter' && !event.nativeEvent?.isComposing) {
+                    event.preventDefault();
+                    saveToken();
+                  }
+                },
+              }),
+              tokenMessage ? h('p', { className: 'wb-set-message' }, tokenMessage) : null,
+              h(
+                'div',
+                { className: 'wb-modal-actions' },
+                tokenConfigured
+                  ? h('button', { className: 'wb-btn', onClick: clearToken, disabled: tokenBusy }, '清除 token')
+                  : null,
+                h('button', { className: 'wb-btn wb-btn-primary', onClick: saveToken, disabled: tokenBusy || !tokenDraft.trim() }, tokenBusy ? '保存中…' : '保存 token'),
+              ),
+              h(
+                'p',
+                { className: 'wb-hint' },
+                '只保存在本机，不会写进前端代码或仓库。网页登录拿到的 token 7 天有效，App 里生成的更稳。',
+              ),
+              h(
+                'p',
+                { className: 'wb-hint' },
+                h('a', { href: 'https://open.maimemo.com/open/api/v1/tokens/openapi', target: '_blank', rel: 'noreferrer' }, '去墨墨开放 API 获取 token'),
+              ),
+            ),
+            h(
+              'section',
+              { className: 'wb-set-group' },
+              h('h3', null, '默写默认'),
+              h(
+                'div',
+                { className: 'wb-set-row' },
+                h('span', { className: 'wb-set-label' }, '默认词库'),
+                h(
+                  'div',
+                  { className: 'wb-seg' },
+                  h(
+                    'button',
+                    {
+                      className: 'wb-seg-btn' + (settings.practiceSource === 'maimemo' ? ' wb-seg-on' : ''),
+                      onClick: () => updateSettings({ practiceSource: 'maimemo' }),
+                    },
+                    '墨墨今日',
+                  ),
+                  h(
+                    'button',
+                    {
+                      className: 'wb-seg-btn' + (settings.practiceSource === 'local' ? ' wb-seg-on' : ''),
+                      onClick: () => updateSettings({ practiceSource: 'local' }),
+                    },
+                    '我的词表',
+                  ),
+                ),
+              ),
+              h(
+                'div',
+                { className: 'wb-set-row' },
+                h('span', { className: 'wb-set-label' }, '每组词数'),
+                h(
+                  'div',
+                  { className: 'wb-seg' },
+                  [5, 10, 15].map((size) =>
+                    h(
+                      'button',
+                      {
+                        key: size,
+                        className: 'wb-seg-btn' + (settings.practiceCount === size ? ' wb-seg-on' : ''),
+                        onClick: () => updateSettings({ practiceCount: size }),
+                      },
+                      String(size),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            h(
+              'section',
+              { className: 'wb-set-group' },
+              h('h3', null, '阅读默认难度'),
+              h(
+                'div',
+                { className: 'wb-set-row' },
+                h(
+                  'select',
+                  {
+                    className: 'wb-select',
+                    value: settings.readingDifficulty,
+                    onChange: (event) => updateSettings({ readingDifficulty: event.target.value }),
+                  },
+                  DIFFICULTIES.map((item) => h('option', { value: item, key: item }, item)),
+                ),
+              ),
+            ),
+            h(
+              'section',
+              { className: 'wb-set-group' },
+              h('h3', null, '每日目标'),
+              h(
+                'div',
+                { className: 'wb-set-row' },
+                h('span', { className: 'wb-set-label' }, '每天练多少题'),
+                h(
+                  'div',
+                  { className: 'wb-seg' },
+                  [10, 20, 30, 50].map((goal) =>
+                    h(
+                      'button',
+                      {
+                        key: goal,
+                        className: 'wb-seg-btn' + (settings.dailyGoal === goal ? ' wb-seg-on' : ''),
+                        onClick: () => updateSettings({ dailyGoal: goal }),
+                      },
+                      String(goal),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            h('p', { className: 'wb-footnote' }, '设置立即生效，只保存在本机。'),
+          ),
+        );
+      }
+
+      function renderReportModal() {
+        return h(
+          'div',
+          { className: 'wb-modal-mask', onClick: () => setReportOpen(false) },
+          h(
+            'div',
+            { className: 'wb-modal wb-report-modal', onClick: (event) => event.stopPropagation() },
+            h(
+              'div',
+              { className: 'wb-modal-head' },
+              h('h2', null, '学习报告'),
+              h('button', { className: 'wb-modal-close', onClick: () => setReportOpen(false), 'aria-label': '关闭' }, '×'),
+            ),
+            h('canvas', { ref: reportCanvasRef, style: { display: 'none' } }),
+            reportImage
+              ? h('img', { className: 'wb-report-img', src: reportImage, alt: '学习报告卡片' })
+              : h('div', { className: 'wb-report-loading' }, '正在生成…'),
+            h('p', { className: 'wb-hint' }, '长按图片可以保存到手机；也可以点下面的按钮。'),
+            h(
+              'div',
+              { className: 'wb-modal-actions' },
+              reportImage
+                ? h(
+                    'a',
+                    { className: 'wb-btn wb-btn-primary', href: reportImage, download: 'dsh-wordbook-report.png' },
+                    '保存图片',
+                  )
+                : null,
+              h('button', { className: 'wb-btn', onClick: () => setReportOpen(false) }, '关闭'),
+            ),
+          ),
+        );
+      }
+
       return h(
         'div',
         { className: 'wb-page' },
@@ -1979,6 +2497,8 @@ window.__ModuleLoader__.load({
             h('div', { className: 'wb-maincol' }, tabs, errorBar, h('div', { className: 'wb-main' }, body)),
           ),
         ),
+        settingsOpen ? renderSettingsModal() : null,
+        reportOpen ? renderReportModal() : null,
       );
     }
 
@@ -2179,6 +2699,28 @@ window.__ModuleLoader__.load({
       .wb-wrong-row em { font-style:normal; color:var(--dsw-alias-label-tertiary); }
       .wb-practice-allgood { margin-top:16px; color:var(--dsw-alias-state-success-primary); font-size:13px; }
       .wb-practice-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:18px; }
+      .wb-icon-btn { width:32px; height:32px; padding:0; display:inline-flex; align-items:center; justify-content:center; border:.5px solid var(--dsw-alias-border-l3); background:var(--dsw-alias-bg-layer-1); color:var(--dsw-alias-label-secondary); border-radius:999px; cursor:pointer; flex:none; }
+      .wb-icon-btn:hover { color:var(--dsw-alias-label-primary); background:var(--dsw-alias-bg-layer-2); }
+      .wb-modal-mask { position:fixed; inset:0; z-index:80; display:flex; align-items:center; justify-content:center; padding:16px; box-sizing:border-box; background:rgba(20,20,28,.42); }
+      .wb-modal { width:min(560px,100%); max-height:88vh; overflow:auto; box-sizing:border-box; background:var(--dsw-alias-bg-base); border:.5px solid var(--dsw-alias-border-l3); border-radius:18px; padding:16px clamp(14px,3vw,22px) 18px; box-shadow:0 24px 70px rgba(0,0,0,.22); }
+      .wb-modal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }
+      .wb-modal-head h2 { margin:0; font-size:18px; font-weight:600; }
+      .wb-modal-close { border:0; background:0 0; color:var(--dsw-alias-label-tertiary); font-size:22px; line-height:1; padding:2px 6px; cursor:pointer; border-radius:6px; }
+      .wb-modal-close:hover { color:var(--dsw-alias-label-primary); background:var(--dsw-alias-bg-layer-2); }
+      .wb-set-group { border-top:.5px solid var(--dsw-alias-border-l4); padding:14px 0 4px; }
+      .wb-set-group h3 { margin:0 0 4px; font-size:13px; font-weight:600; color:var(--dsw-alias-label-secondary); }
+      .wb-set-row { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:8px; }
+      .wb-set-label { font-size:12px; color:var(--dsw-alias-label-tertiary); }
+      .wb-set-value { font-size:12px; color:var(--dsw-alias-label-primary); }
+      .wb-set-input { width:100%; margin-top:10px; }
+      .wb-set-message { margin:6px 0 0; font-size:12px; color:var(--dsw-alias-label-secondary); }
+      .wb-select { border:.5px solid var(--dsw-alias-border-l3); background:var(--dsw-alias-bg-layer-1); color:var(--dsw-alias-label-primary); border-radius:8px; padding:5px 10px; font:inherit; font-size:12px; }
+      .wb-modal-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:12px; }
+      .wb-modal a.wb-btn { text-decoration:none; }
+      .wb-report-img { width:100%; display:block; border-radius:12px; border:.5px solid var(--dsw-alias-border-l3); }
+      .wb-report-loading { padding:60px 10px; text-align:center; color:var(--dsw-alias-label-tertiary); font-size:13px; }
+      .wb-modal .wb-hint { line-height:1.6; }
+      .wb-modal .wb-hint a { color:var(--dsw-alias-brand-primary); }
       @media (max-width:700px) {
         .wb-side { width:clamp(132px,32%,186px); }
         .wb-wmean { font-size:11px; }
@@ -2238,6 +2780,7 @@ window.__ModuleLoader__.load({
         normalizeState,
         normalizeWords,
         richText,
+        drawReport,
         WordbookPanel,
         judgeLocal,
         normalizeZh,

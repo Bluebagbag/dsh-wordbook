@@ -18,7 +18,7 @@ const moduleExports = captured.factory((name) => {
   if (name === 'react') return React
   throw new Error('unexpected require: ' + name)
 })
-const { parseWordInput, normalizeState, normalizeWords, REVIEW_INTERVALS, normalizeReview, rateReview, isDueToday, isMature, dueLabel, judgeLocal } = moduleExports.__internals
+const { parseWordInput, normalizeState, normalizeWords, REVIEW_INTERVALS, normalizeReview, rateReview, isDueToday, isMature, dueLabel, judgeLocal, drawReport } = moduleExports.__internals
 
 const pairs = (text) => JSON.stringify(parseWordInput(text).map((w) => [w.term, w.meaning]))
 assert.equal(pairs('apple 苹果'), JSON.stringify([['apple', '苹果']]))
@@ -34,6 +34,15 @@ const state = normalizeState({ words: [{ term: 'apple' }], chat: [{ role: 'user'
 assert.equal(state.words.length, 1)
 assert.equal(state.chat.length, 1)
 assert.equal(state.updatedAt, 5)
+
+
+const withHistory = normalizeState({ history: [
+  { ts: 1, term: 'apple', correct: true, source: 'local' },
+  { ts: 2, term: 'pear', correct: false, source: 'maimemo' },
+  { ts: 'bad', term: '' },
+] })
+assert.equal(withHistory.history.length, 2)
+assert.equal(withHistory.history[1].source, 'maimemo')
 
 // 艾宾浩斯：新词 10 分钟后进入第一次复习；记住升一阶，忘了回到第一阶。
 const now = Date.now()
@@ -83,3 +92,20 @@ assert.equal(modeOf({ is_new: false }, { study_count: 5, tags: ['WELL_FAMILIAR']
 assert.equal(modeOf({ is_new: false }, { study_count: 4, tags: [] }), 'sentence')
 assert.equal(modeOf({ is_new: false }, { study_count: 3, tags: [] }), 'word')
 console.log('maimemo mode: OK')
+
+// 报告卡片：用假 canvas 跑一遍绘制，至少保证不会因为缺方法炸掉。
+const ctx = {
+  fillStyle: '', font: '', textBaseline: '',
+  fillRect() {}, beginPath() {}, moveTo() {}, arcTo() {}, closePath() {}, fill() {}, fillText() {},
+  measureText: (text) => ({ width: String(text).length * 10 }),
+}
+const canvas = { width: 0, height: 0, getContext: () => ctx, toDataURL: () => 'data:image/png;base64,x' }
+const png = drawReport(canvas, {
+  date: '2026-11-28', todayCount: 12, accuracy: 83, streak: 4, goal: 20, due: 9,
+  mmFinished: 10, mmTotal: 50,
+  bars: Array.from({ length: 14 }, (_, i) => ({ label: '11/' + (i + 1), count: i % 4 })),
+  weak: [{ term: 'heritage', count: 2 }],
+})
+assert.equal(png, 'data:image/png;base64,x')
+assert.equal(canvas.width, 1080)
+console.log('report card: OK')

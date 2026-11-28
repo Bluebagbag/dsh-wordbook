@@ -153,4 +153,11 @@ output = render({ __testPractice: practiceDone })
 assert.ok(output.includes('这一轮做完了') && output.includes('正确率 0%'), '默写结果页')
 assert.ok(output.includes('错词 1 个') && output.includes('你写的：质疑'), '错词清单')
 
+// 6. 设置面板与学习报告
+output = render({ __testSettingsOpen: true })
+assert.ok(output.includes('设置') && output.includes('墨墨 API'), '设置面板')
+assert.ok(output.includes('保存 token') && output.includes('每日目标'), '设置项')
+output = render({ __testReportOpen: true })
+assert.ok(output.includes('学习报告') && output.includes('正在生成'), '学习报告弹层')
+
 console.log('wordbook render: OK')
