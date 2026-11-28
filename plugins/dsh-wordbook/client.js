@@ -1304,7 +1304,7 @@ window.__ModuleLoader__.load({
         setSettings(next);
         if (Object.prototype.hasOwnProperty.call(patch, 'readingDifficulty')) setDifficulty(next.readingDifficulty);
         setPractice((previous) =>
-          previous.status === 'idle'
+          previous.status === 'idle' || previous.status === 'done'
             ? { ...previous, source: next.practiceSource, count: next.practiceCount }
             : previous,
         );
