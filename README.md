@@ -25,6 +25,11 @@
 | --- | --- |
 | ![阅读短文](docs/screenshots/reading-passage.jpg) | ![阅读理解题](docs/screenshots/reading-quiz.jpg) |
 
+
+| 默写：英文语境题，只填句中词义 | 默写：判分反馈与整句翻译 |
+| --- | --- |
+| ![结构化默写题目](docs/screenshots/practice-question.jpg) | ![结构化默写判分反馈](docs/screenshots/practice-feedback.jpg) |
+
 ## 四个插件
 
 | 目录 | 作用 |

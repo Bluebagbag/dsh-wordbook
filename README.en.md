@@ -27,6 +27,11 @@ Most flashcard apps keep your words inside their own schedule. This plugin puts 
 | --- | --- |
 | ![Reading passage](docs/screenshots/reading-passage.jpg) | ![Reading quiz](docs/screenshots/reading-quiz.jpg) |
 
+
+| Structured dictation: context question | Dictation feedback and translation |
+| --- | --- |
+| ![Structured dictation question](docs/screenshots/practice-question.jpg) | ![Structured dictation feedback](docs/screenshots/practice-feedback.jpg) |
+
 ## Plugins
 
 | Directory | Purpose |
